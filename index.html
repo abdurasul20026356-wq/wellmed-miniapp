@@ -1,4 +1,4 @@
-<!doctype html><html><head><script src="https://telegram.org/js/telegram-web-app.js"></script><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<!doctype html><html><head><script src="https://telegram.org/js/telegram-web-app.js"></script><script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#faf9f5;color:#141413}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
 <title>Well Med Mini App (Copy)</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -189,6 +189,71 @@ const PRODUCTS = [
   {id:"oripen", name:"ORIPEN", alias:"орипен", docs:[{cmd:"oripen"}]},
 ];
 
+/* ---------- backend config ----------
+   Fill these in after you create your Supabase project (see SETUP.md).
+   The anon key is meant to be public in a frontend — it can only do what
+   Row Level Security allows, which is read-only on the public catalog. */
+const CONFIG = {
+  SUPABASE_URL: "https://miarkevtlmadwlutonkm.supabase.co",
+  SUPABASE_ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1pYXJrZXZ0bG1hZHdsdXRvbmttIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTAxNjY1ODEsImV4cCI6MjEwNTc0MjU4MX0.ZQSzzwUqAJ1k2C_JQFvZr0KqYoRV8IpKYf-aPW74yMg"
+};
+const BACKEND_CONFIGURED = !CONFIG.SUPABASE_URL.includes("YOUR-PROJECT") && !CONFIG.SUPABASE_ANON_KEY.includes("YOUR-ANON-KEY");
+const sbClient = (BACKEND_CONFIGURED && window.supabase) ? window.supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_ANON_KEY) : null;
+
+function productImage(p){ return p.image_url || ASSETS[p.id] || ASSETS.icon || ""; }
+
+const api = {
+  base(){ return CONFIG.SUPABASE_URL.replace(/\/$/, "") + "/functions/v1/api"; },
+  headers(){
+    return {
+      "Content-Type": "application/json",
+      "Authorization": "Bearer " + CONFIG.SUPABASE_ANON_KEY,
+      "apikey": CONFIG.SUPABASE_ANON_KEY,
+      "X-Telegram-Init-Data": (tg && tg.initData) || ""
+    };
+  },
+  async call(path, opts){
+    if(!BACKEND_CONFIGURED) throw new Error("backend_not_configured");
+    const res = await fetch(this.base()+path, Object.assign({headers:this.headers()}, opts||{}));
+    const j = await res.json().catch(()=>({}));
+    if(!res.ok) throw new Error(j.error || "request_failed");
+    return j;
+  },
+  async authPing(){
+    if(!BACKEND_CONFIGURED || !tg || !tg.initData) return;
+    try{ await fetch(CONFIG.SUPABASE_URL.replace(/\/$/,"")+"/functions/v1/telegram-auth", {method:"POST", headers:this.headers()}); }
+    catch(e){ console.warn("auth ping failed", e); }
+  },
+  async saveProfile(role, profile){
+    if(!BACKEND_CONFIGURED || !tg || !tg.initData) return;
+    try{ await this.call("/profile", {method:"POST", body:JSON.stringify({role, profile})}); }
+    catch(e){ console.warn("save profile failed", e); }
+  },
+  async fetchProfile(){ return this.call("/profile", {method:"GET"}); },
+  async saveSymptomRequest(symptoms, custom){
+    return this.call("/patient-requests", {method:"POST", body:JSON.stringify({symptoms, custom_symptom:custom})});
+  },
+  async fetchMyRequests(){ const j = await this.call("/patient-requests", {method:"GET"}); return j.requests || []; },
+  async fetchRequestDetail(id){ return this.call("/patient-requests/detail?id="+encodeURIComponent(id), {method:"GET"}); },
+  async fetchFavorites(){ const j = await this.call("/favorites", {method:"GET"}); return j.favorites || []; },
+  async addFavorite(slug){ return this.call("/favorites", {method:"POST", body:JSON.stringify({product_id:slug})}); },
+  async removeFavorite(slug){ return this.call("/favorites/remove", {method:"POST", body:JSON.stringify({product_id:slug})}); },
+  async fetchSupportRequests(){ const j = await this.call("/support-requests", {method:"GET"}); return j.requests || []; },
+  async sendSupportRequest(type, message){ return this.call("/support-requests", {method:"POST", body:JSON.stringify({type, message})}); },
+  async fetchNotifications(){ const j = await this.call("/notifications", {method:"GET"}); return j.notifications || []; },
+  async markNotificationRead(id){ return this.call("/notifications/read", {method:"POST", body:JSON.stringify({id})}); },
+  async fetchOrders(){ const j = await this.call("/orders", {method:"GET"}); return j.orders || []; },
+  async fetchProducts(){
+    if(!BACKEND_CONFIGURED || !sbClient) return null;
+    try{
+      const {data,error} = await sbClient.from("products").select("slug,name,form_uz,form_ru,form_en,search_alias,image_url").eq("active",true);
+      if(error || !data) return null;
+      return data;
+    }catch(e){ console.warn("fetchProducts failed, keeping the built-in list", e); return null; }
+  }
+};
+let favSlugs = new Set(); // slugs the patient has saved, kept in sync with the backend
+
 /* ---------- i18n ---------- */
 const T = {
 uz:{
@@ -196,19 +261,20 @@ uz:{
  chooseLang:"Tilni tanlang", langHint:"Keyin Sozlamalarda o'zgartirishingiz mumkin.",
  welcome:"Assalomu alaykum! 👋", welcomeSub:"Well Med Pharm platformasiga xush kelibsiz. Mahsulotlar, yo'riqnomalar va buyurtmalar — bir joyda.",
  next:"Davom etish", who:"Platformaga kim sifatida kirasiz?", whoSub:"Rolingizga qarab kerakli bo'limlar ochiladi.",
- roles:{DOCTOR:"Doktor",PHARMACY:"Dorixona",MEDICAL_REP:"Medical representative",PARTNER:"Kompaniya hamkori"},
- roleDesc:{DOCTOR:"Mahsulot ma'lumotlari va yo'riqnomalar",PHARMACY:"B2B buyurtma va mahsulotlar",MEDICAL_REP:"Hududingiz, shifokorlar va dorixonalar",PARTNER:"Hamkorlik va umumiy katalog"},
+ roles:{DOCTOR:"Doktor",PHARMACY:"Dorixona",MEDICAL_REP:"Medical representative",PATIENT:"Bemor / Mijoz"},
+ roleDesc:{DOCTOR:"Mahsulot ma'lumotlari va yo'riqnomalar",PHARMACY:"B2B buyurtma va mahsulotlar",MEDICAL_REP:"Hududingiz, shifokorlar va dorixonalar",PATIENT:"Dorilar, simptomlar va yordam"},
  regTitle:"Ro'yxatdan o'tish", back:"Orqaga",
  f:{first:"Ism",last:"Familiya",phone:"Telefon",specialty:"Mutaxassislik",work:"Ish joyi",city:"Shahar",district:"Tuman",clinic:"Klinika (ixtiyoriy)",pname:"Dorixona nomi",resp:"Mas'ul shaxs",address:"Manzil",tg:"Telegram username (ixtiyoriy)",region:"Hudud",wregion:"Ishlaydigan region",istatus:"Kompaniya ichidagi status",company:"Kompaniya nomi",position:"Lavozim"},
  req:"Majburiy maydon", badPhone:"Telefon raqamini to'liq kiriting: +998 XX XXX XX XX",
  regBtn:"Ro'yxatdan o'tish", regPharm:"Dorixonani ro'yxatdan o'tkazish",
  regNote:"Preview: ma'lumotlar faqat shu qurilmada turadi, serverga yuborilmaydi. Haqiqiy ro'yxatdan o'tish Faza 1–2 da ulanadi.",
- hi:"Salom", search:"Mahsulot yoki xizmatni qidiring…",
+ hi:"Salom", patientHi:"Assalomu alaykum", patientHiSub:"Bugun sizga qanday yordam bera olamiz?", search:"Mahsulot yoki xizmatni qidiring…",
  tiles:{
   products:["Mahsulotlar","Barcha Well Med mahsulotlari"],order:["Buyurtma berish","Savatcha va checkout"],where:["Qayerdan topish","Dorixonalar katalogi"],
   leaflets:["Yo'riqnomalar","PDF instruksiyalar"],doctors:["Shifokorlar uchun","Professional ma'lumot"],rep:["Medical Representative","Rep bo'limi"],
   promo:["Aksiyalar","Yangiliklar va takliflar"],support:["Support","Biz bilan bog'lanish"],materials:["Medical materials","Ilmiy materiallar"],
   mdsupport:["Medical support","Savol yuborish"],contactRep:["Representative bilan bog'lanish","Hududingiz vakili"],request:["So'rov yuborish","Namuna va ma'lumot"],
+  symptom:["Meni nima bezovta qilmoqda?","Simptom bo'yicha yordam"],myRequests:["Mening so'rovlarim","Yuborilgan murojaatlar"],saved:["Saqlanganlar","Sevimli mahsulotlar"],pOrders:["Buyurtmalarim","Buyurtmalar tarixi"],pharmacist:["Farmatsevt bilan bog'lanish","Savolingizni yozing"],profileTile:["Profil","Hisobingiz va sozlamalar"],
   rDoctors:["Doctors","Shifokorlar bazasi"],rClinics:["Clinics","Klinikalar"],rPharm:["Pharmacies","Dorixonalar"],rOrders:["Orders","Buyurtmalar monitoringi"],
   rStats:["Statistics","Ko'rsatkichlar"],rTerritory:["Territory","Hudud"],rVisits:["Visit notes","Tashrif yozuvlari"]},
  soon:"TEZ ORADA", catalog:"TOP 15 KATALOG", catalogSub:"Eng ko'p sotiladigan mahsulotlar — PDF",
@@ -231,26 +297,46 @@ uz:{
  settings:"Sozlamalar", language:"Til", theme:"Mavzu", themeAuto:"Telegram / tizim", reset:"Previewni qaytadan boshlash", resetDone:"Qayta boshlandi",
  notConnected:"NOT CONNECTED YET", soonTitle:"Bu bo'lim tayyorlanmoqda", soonBody:"Ushbu funksiya reja bo'yicha keyingi fazada backend bilan ulanadi. Soxta ma'lumot ko'rsatmaslik uchun hozircha bo'sh.",
  phase:"Faza", close:"Yopish",
- nav:{home:"Bosh sahifa",products:"Mahsulotlar",orders:"Buyurtmalar",support:"Support",profile:"Profil"}
+ nav:{home:"Bosh sahifa",products:"Mahsulotlar",orders:"Buyurtmalar",support:"Support",profile:"Profil"},
+ sym:{
+  title:"Qaysi muammo sizni bezovta qilmoqda?", sub:"Bir nechtasini tanlashingiz mumkin.",
+  headache:"Bosh og'rig'i", sore_throat:"Tomoq og'rig'i", cough:"Yo'tal", allergy:"Allergiya", stomach:"Oshqozon", vitamins:"Vitaminlar", other:"Boshqa",
+  customBtn:"✏️ O'zim yozaman", customQ:"Sizni nima bezovta qilmoqda?", customPh:"Masalan: boshim og'riyapti, tomog'im achishyapti...",
+  submit:"Yuborish", sending:"Yuborilmoqda…", sent:"Qabul qilindi. Farmatsevtlarimiz ko'rib chiqadi.",
+  sendError:"Yuborib bo'lmadi. Internetni tekshirib, qayta urinib ko'ring.", pickAtLeastOne:"Kamida bitta variantni tanlang yoki o'zingiz yozing.",
+  disclaimer:"Ushbu ma'lumot umumiy maqsadda berilgan va shifokor tashxisini almashtirmaydi. Dori vositalarini qo'llashdan oldin yo'riqnoma bilan tanishing va zarur bo'lsa shifokor yoki farmatsevt bilan maslahatlashing.",
+  myReqEmpty:"Hozircha so'rov yubormagansiz.", myReqLoading:"Yuklanmoqda…", myReqError:"So'rovlarni yuklab bo'lmadi.",
+  statusNew:"Ko'rib chiqilmoqda", statusReviewed:"Ko'rib chiqildi", statusClosed:"Yopilgan",
+  resultTitle:"Sizga mos bo'lishi mumkin bo'lgan mahsulotlar", resultSub:"Bu tavsiya emas — faqat ma'lumot uchun.", noMatch:"Mos mahsulot topilmadi. Farmatsevtlarimiz so'rovingizni ko'rib chiqadi.",
+  detailTitle:"So'rov tafsilotlari",
+  favEmpty:"Hozircha saqlangan mahsulot yo'q.", favLoading:"Yuklanmoqda…", favError:"Amalga oshmadi. Qayta urinib ko'ring.", favAdded:"Saqlandi", favRemoved:"O'chirildi",
+  supportTypes:{product:"Mahsulot bo'yicha",leaflet:"Yo'riqnoma bo'yicha",symptom:"Simptom bo'yicha",order:"Buyurtma bo'yicha",other:"Boshqa"},
+  supportQ:"Savolingizni yozing", supportPh:"Xabaringizni shu yerga yozing...", supportSend:"Yuborish", supportSent:"Yuborildi. Farmatsevtlarimiz tez orada javob beradi.", supportError:"Yuborib bo'lmadi. Qayta urinib ko'ring.",
+  supportHistoryTitle:"Murojaatlarim", supportHistoryEmpty:"Hozircha murojaat yubormagansiz.", pharmacistReply:"Farmatsevt javobi",
+  notifTitle:"Bildirishnomalar", notifEmpty:"Bildirishnoma yo'q.", notifLoading:"Yuklanmoqda…",
+  ordersEmpty:"Hozircha buyurtmalar yo'q.", ordersLoading:"Yuklanmoqda…", ordersError:"Yuklab bo'lmadi.",
+  statusPending:"Kutilmoqda", statusPreparing:"Tayyorlanmoqda", statusReady:"Tayyor", statusCompleted:"Yakunlangan", statusCancelled:"Bekor qilingan"
+ }
 },
 ru:{
  preview:"PREVIEW · бэкенд не подключён", tag:"Born to care & cure",
  chooseLang:"Выберите язык", langHint:"Позже можно изменить в настройках.",
  welcome:"Здравствуйте! 👋", welcomeSub:"Добро пожаловать на платформу Well Med Pharm. Продукция, инструкции и заказы — в одном месте.",
  next:"Продолжить", who:"Кто вы на платформе?", whoSub:"Разделы откроются в зависимости от вашей роли.",
- roles:{DOCTOR:"Врач",PHARMACY:"Аптека",MEDICAL_REP:"Медицинский представитель",PARTNER:"Партнёр компании"},
- roleDesc:{DOCTOR:"Информация о препаратах и инструкции",PHARMACY:"B2B-заказы и продукция",MEDICAL_REP:"Территория, врачи и аптеки",PARTNER:"Сотрудничество и общий каталог"},
+ roles:{DOCTOR:"Врач",PHARMACY:"Аптека",MEDICAL_REP:"Медицинский представитель",PATIENT:"Пациент / Клиент"},
+ roleDesc:{DOCTOR:"Информация о препаратах и инструкции",PHARMACY:"B2B-заказы и продукция",MEDICAL_REP:"Территория, врачи и аптеки",PATIENT:"Препараты, симптомы и помощь"},
  regTitle:"Регистрация", back:"Назад",
  f:{first:"Имя",last:"Фамилия",phone:"Телефон",specialty:"Специальность",work:"Место работы",city:"Город",district:"Район",clinic:"Клиника (необязательно)",pname:"Название аптеки",resp:"Ответственное лицо",address:"Адрес",tg:"Telegram username (необязательно)",region:"Регион",wregion:"Рабочий регион",istatus:"Статус в компании",company:"Название компании",position:"Должность"},
  req:"Обязательное поле", badPhone:"Введите полный номер: +998 XX XXX XX XX",
  regBtn:"Зарегистрироваться", regPharm:"Зарегистрировать аптеку",
  regNote:"Preview: данные хранятся только на этом устройстве и не отправляются на сервер. Реальная регистрация подключится в фазах 1–2.",
- hi:"Привет", search:"Найдите препарат или услугу…",
+ hi:"Привет", patientHi:"Здравствуйте", patientHiSub:"Как мы можем помочь вам сегодня?", search:"Найдите препарат или услугу…",
  tiles:{
   products:["Продукция","Все препараты Well Med"],order:["Оформить заказ","Корзина и оформление"],where:["Где купить","Каталог аптек"],
   leaflets:["Инструкции","PDF-инструкции"],doctors:["Для врачей","Профессиональная информация"],rep:["Медпредставитель","Раздел представителя"],
   promo:["Акции","Новости и предложения"],support:["Поддержка","Связаться с нами"],materials:["Медицинские материалы","Научные материалы"],
   mdsupport:["Медицинская поддержка","Задать вопрос"],contactRep:["Связь с представителем","Представитель вашего региона"],request:["Отправить запрос","Образцы и информация"],
+  symptom:["Что вас беспокоит?","Помощь по симптому"],myRequests:["Мои запросы","Отправленные обращения"],saved:["Сохранённые","Избранные препараты"],pOrders:["Мои заказы","История заказов"],pharmacist:["Связаться с фармацевтом","Напишите свой вопрос"],profileTile:["Профиль","Аккаунт и настройки"],
   rDoctors:["Врачи","База врачей"],rClinics:["Клиники","Клиники"],rPharm:["Аптеки","Аптеки"],rOrders:["Заказы","Мониторинг заказов"],
   rStats:["Статистика","Показатели"],rTerritory:["Территория","Регион"],rVisits:["Визиты","Заметки о визитах"]},
  soon:"СКОРО", catalog:"КАТАЛОГ ТОП-15", catalogSub:"Самые продаваемые препараты — PDF",
@@ -273,26 +359,46 @@ ru:{
  settings:"Настройки", language:"Язык", theme:"Тема", themeAuto:"Telegram / система", reset:"Начать preview заново", resetDone:"Начато заново",
  notConnected:"NOT CONNECTED YET", soonTitle:"Раздел в разработке", soonBody:"Функция подключится к бэкенду в следующей фазе. Чтобы не показывать фальшивые данные, пока раздел пуст.",
  phase:"Фаза", close:"Закрыть",
- nav:{home:"Главная",products:"Продукция",orders:"Заказы",support:"Поддержка",profile:"Профиль"}
+ nav:{home:"Главная",products:"Продукция",orders:"Заказы",support:"Поддержка",profile:"Профиль"},
+ sym:{
+  title:"Какая проблема вас беспокоит?", sub:"Можно выбрать несколько вариантов.",
+  headache:"Головная боль", sore_throat:"Боль в горле", cough:"Кашель", allergy:"Аллергия", stomach:"Желудок", vitamins:"Витамины", other:"Другое",
+  customBtn:"✏️ Напишу сам(а)", customQ:"Что вас беспокоит?", customPh:"Например: болит голова, першит в горле...",
+  submit:"Отправить", sending:"Отправка…", sent:"Принято. Наши фармацевты рассмотрят обращение.",
+  sendError:"Не удалось отправить. Проверьте интернет и попробуйте снова.", pickAtLeastOne:"Выберите хотя бы один вариант или напишите сами.",
+  disclaimer:"Информация предоставлена в ознакомительных целях и не заменяет консультацию врача. Перед применением лекарственных средств ознакомьтесь с инструкцией и при необходимости проконсультируйтесь с врачом или фармацевтом.",
+  myReqEmpty:"Вы пока не отправляли запросы.", myReqLoading:"Загрузка…", myReqError:"Не удалось загрузить запросы.",
+  statusNew:"На рассмотрении", statusReviewed:"Рассмотрено", statusClosed:"Закрыто",
+  resultTitle:"Возможно, вам подойдут эти препараты", resultSub:"Это не рекомендация — только информация.", noMatch:"Подходящих препаратов не найдено. Наши фармацевты рассмотрят ваш запрос.",
+  detailTitle:"Детали запроса",
+  favEmpty:"Пока нет сохранённых препаратов.", favLoading:"Загрузка…", favError:"Не удалось выполнить. Попробуйте снова.", favAdded:"Сохранено", favRemoved:"Удалено",
+  supportTypes:{product:"По препарату",leaflet:"По инструкции",symptom:"По симптому",order:"По заказу",other:"Другое"},
+  supportQ:"Напишите свой вопрос", supportPh:"Введите сообщение здесь...", supportSend:"Отправить", supportSent:"Отправлено. Наши фармацевты скоро ответят.", supportError:"Не удалось отправить. Попробуйте снова.",
+  supportHistoryTitle:"Мои обращения", supportHistoryEmpty:"Вы пока не отправляли обращения.", pharmacistReply:"Ответ фармацевта",
+  notifTitle:"Уведомления", notifEmpty:"Уведомлений нет.", notifLoading:"Загрузка…",
+  ordersEmpty:"Заказов пока нет.", ordersLoading:"Загрузка…", ordersError:"Не удалось загрузить.",
+  statusPending:"Ожидает", statusPreparing:"Готовится", statusReady:"Готово", statusCompleted:"Завершён", statusCancelled:"Отменён"
+ }
 },
 en:{
  preview:"PREVIEW · backend not connected", tag:"Born to care & cure",
  chooseLang:"Choose your language", langHint:"You can change it later in Settings.",
  welcome:"Welcome! 👋", welcomeSub:"Welcome to the Well Med Pharm platform. Products, leaflets and orders — all in one place.",
  next:"Continue", who:"How will you use the platform?", whoSub:"We'll open the sections that fit your role.",
- roles:{DOCTOR:"Doctor",PHARMACY:"Pharmacy",MEDICAL_REP:"Medical representative",PARTNER:"Company partner"},
- roleDesc:{DOCTOR:"Product information and leaflets",PHARMACY:"B2B orders and products",MEDICAL_REP:"Your territory, doctors and pharmacies",PARTNER:"Partnership and full catalog"},
+ roles:{DOCTOR:"Doctor",PHARMACY:"Pharmacy",MEDICAL_REP:"Medical representative",PATIENT:"Patient / Client"},
+ roleDesc:{DOCTOR:"Product information and leaflets",PHARMACY:"B2B orders and products",MEDICAL_REP:"Your territory, doctors and pharmacies",PATIENT:"Medicines, symptoms and help"},
  regTitle:"Sign up", back:"Back",
  f:{first:"First name",last:"Last name",phone:"Phone",specialty:"Specialty",work:"Workplace",city:"City",district:"District",clinic:"Clinic (optional)",pname:"Pharmacy name",resp:"Person in charge",address:"Address",tg:"Telegram username (optional)",region:"Region",wregion:"Working region",istatus:"Status in the company",company:"Company name",position:"Position"},
  req:"Required", badPhone:"Enter the full number: +998 XX XXX XX XX",
  regBtn:"Sign up", regPharm:"Register pharmacy",
  regNote:"Preview: your data stays on this device only and is not sent to a server. Real sign-up is connected in phases 1–2.",
- hi:"Hi", search:"Search products or services…",
+ hi:"Hi", patientHi:"Hello", patientHiSub:"How can we help you today?", search:"Search products or services…",
  tiles:{
   products:["Products","All Well Med products"],order:["Place an order","Cart and checkout"],where:["Where to buy","Pharmacy directory"],
   leaflets:["Leaflets","PDF instructions"],doctors:["For doctors","Professional information"],rep:["Medical representative","Rep section"],
   promo:["Promotions","News and offers"],support:["Support","Contact us"],materials:["Medical materials","Scientific materials"],
   mdsupport:["Medical support","Ask a question"],contactRep:["Contact a representative","Your regional rep"],request:["Send a request","Samples and information"],
+  symptom:["What's bothering you?","Symptom-based help"],myRequests:["My requests","Requests you've sent"],saved:["Saved","Favorite products"],pOrders:["My orders","Order history"],pharmacist:["Contact a pharmacist","Send your question"],profileTile:["Profile","Account and settings"],
   rDoctors:["Doctors","Doctor database"],rClinics:["Clinics","Clinics"],rPharm:["Pharmacies","Pharmacies"],rOrders:["Orders","Order monitoring"],
   rStats:["Statistics","Performance"],rTerritory:["Territory","Region"],rVisits:["Visit notes","Visit log"]},
  soon:"COMING SOON", catalog:"TOP 15 CATALOG", catalogSub:"Best-selling products — PDF",
@@ -315,7 +421,26 @@ en:{
  settings:"Settings", language:"Language", theme:"Theme", themeAuto:"Telegram / system", reset:"Restart the preview", resetDone:"Restarted",
  notConnected:"NOT CONNECTED YET", soonTitle:"This section is on the way", soonBody:"It will be connected to the backend in an upcoming phase. It stays empty until then so we never show fake data.",
  phase:"Phase", close:"Close",
- nav:{home:"Home",products:"Products",orders:"Orders",support:"Support",profile:"Profile"}
+ nav:{home:"Home",products:"Products",orders:"Orders",support:"Support",profile:"Profile"},
+ sym:{
+  title:"What problem is bothering you?", sub:"You can select more than one.",
+  headache:"Headache", sore_throat:"Sore throat", cough:"Cough", allergy:"Allergy", stomach:"Stomach", vitamins:"Vitamins", other:"Other",
+  customBtn:"✏️ I'll describe it myself", customQ:"What's bothering you?", customPh:"E.g.: I have a headache, my throat hurts...",
+  submit:"Send", sending:"Sending…", sent:"Received. Our pharmacists will review it.",
+  sendError:"Couldn't send it. Check your connection and try again.", pickAtLeastOne:"Pick at least one option or describe it yourself.",
+  disclaimer:"This information is provided for general informational purposes and does not replace medical advice. Read the instructions before using medicines and consult a doctor or pharmacist when necessary.",
+  myReqEmpty:"You haven't sent any requests yet.", myReqLoading:"Loading…", myReqError:"Couldn't load your requests.",
+  statusNew:"Under review", statusReviewed:"Reviewed", statusClosed:"Closed",
+  resultTitle:"Products that may match your symptoms", resultSub:"This is not a recommendation — for information only.", noMatch:"No matching products found. Our pharmacists will review your request.",
+  detailTitle:"Request details",
+  favEmpty:"No saved products yet.", favLoading:"Loading…", favError:"Something went wrong. Please try again.", favAdded:"Saved", favRemoved:"Removed",
+  supportTypes:{product:"About a product",leaflet:"About a leaflet",symptom:"About a symptom",order:"About an order",other:"Other"},
+  supportQ:"Write your question", supportPh:"Type your message here...", supportSend:"Send", supportSent:"Sent. Our pharmacists will reply soon.", supportError:"Couldn't send it. Please try again.",
+  supportHistoryTitle:"My requests", supportHistoryEmpty:"You haven't sent any requests yet.", pharmacistReply:"Pharmacist's reply",
+  notifTitle:"Notifications", notifEmpty:"No notifications.", notifLoading:"Loading…",
+  ordersEmpty:"No orders yet.", ordersLoading:"Loading…", ordersError:"Couldn't load.",
+  statusPending:"Pending", statusPreparing:"Preparing", statusReady:"Ready", statusCompleted:"Completed", statusCancelled:"Cancelled"
+ }
 }};
 
 /* ---------- state ---------- */
@@ -343,13 +468,13 @@ profile:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width
 search:'<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>',
 chev:'<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m9 6 6 6-6 6"/></svg>'
 };
-const ROLE_ICON={DOCTOR:"👨‍⚕️",PHARMACY:"💊",MEDICAL_REP:"🧑‍💼",PARTNER:"🏢"};
+const ROLE_ICON={DOCTOR:"👨‍⚕️",PHARMACY:"💊",MEDICAL_REP:"🧑‍💼",PATIENT:"🤒"};
 
 /* ---------- shared header ---------- */
 function header(showLang=true){
   return `<div class="topbar"><img src="${ASSETS.logo}" alt="WELL MED PHARM">
   ${showLang?`<div class="lang-mini" role="group" aria-label="Language">${["uz","ru","en"].map(l=>`<button data-lang="${l}" aria-pressed="${S.lang===l}">${l.toUpperCase()}</button>`).join("")}</div>`:""}</div>
-  <div style="margin-bottom:12px"><span class="pill preview-pill">● ${esc(t().preview)}</span></div>`;
+  ${BACKEND_CONFIGURED?"":`<div style="margin-bottom:12px"><span class="pill preview-pill">● ${esc(t().preview)}</span></div>`}`;
 }
 
 /* ---------- onboarding ---------- */
@@ -373,7 +498,7 @@ const FORMS={
   DOCTOR:[["first",1],["last",1],["phone",1,"tel"],["specialty",1],["work",1],["city",1],["district",1],["clinic",0]],
   PHARMACY:[["pname",1],["resp",1],["phone",1,"tel"],["city",1],["district",1],["address",1],["tg",0]],
   MEDICAL_REP:[["first",1],["last",1],["phone",1,"tel"],["region",1],["wregion",1],["istatus",1]],
-  PARTNER:[["first",1],["last",1],["phone",1,"tel"],["company",1],["position",0],["city",1]]
+  PATIENT:[["first",1],["last",0],["phone",0,"tel"]]
 };
 function vForm(){
   const tgUser=tg&&tg.initDataUnsafe&&tg.initDataUnsafe.user; const p=S.profile||{};
@@ -393,14 +518,27 @@ function tile(key,icon,opts={}){const [n,d]=t().tiles[key];return `<button class
 function homeTiles(){
   if(S.role==="DOCTOR") return [tile("products","💊"),tile("leaflets","📖"),tile("materials","📚",{phase:5}),tile("mdsupport","💬",{phase:4}),tile("contactRep","🧑‍💼",{phase:7}),tile("request","📩",{phase:4})];
   if(S.role==="MEDICAL_REP") return [tile("products","💊"),tile("rDoctors","👨‍⚕️",{phase:7}),tile("rClinics","🏥",{phase:7}),tile("rPharm","💊",{phase:7}),tile("rOrders","📦",{phase:7}),tile("rStats","📊",{phase:7}),tile("rTerritory","📍",{phase:7}),tile("rVisits","📝",{phase:7})];
+  if(S.role==="PATIENT") return [tile("products","🔎"),tile("symptom","🩺"),tile("myRequests","📋"),tile("saved","❤️"),tile("pOrders","🛒"),tile("pharmacist","📞"),tile("profileTile","👤")];
   return [tile("products","💊"),tile("order","📦"),tile("where","📍",{phase:7}),tile("leaflets","📖"),tile("doctors","👨‍⚕️",{phase:5}),tile("rep","🧑‍💼",{phase:7}),tile("promo","🎁",{phase:5}),tile("support","💬")];
 }
 function displayName(){const p=S.profile||{};return p.first||p.resp||p.pname||""}
 function vHome(){
+  if(S.role==="PATIENT") return vHomePatient();
   return `${header()}<div class="screen stack">
    <div class="glass hello stack" style="gap:8px"><h1 class="h1">${esc(t().hi)}, ${esc(displayName())} 👋</h1><div><span class="pill badge">${ROLE_ICON[S.role]} ${esc(t().roles[S.role])}</span></div></div>
    <label class="glass search">${I.search}<input id="homeSearch" placeholder="${esc(t().search)}" aria-label="${esc(t().search)}"></label>
    <button class="catalog-cta" data-catalog><span style="font-size:28px">📋</span><span><b>${esc(t().catalog)}</b><span style="opacity:.85;font-size:13px">${esc(t().catalogSub)}</span></span></button>
+   <div class="grid2">${homeTiles().join("")}</div></div>`;
+}
+function vHomePatient(){
+  return `${header()}<div class="screen stack">
+   <div class="glass hello stack" style="gap:8px">
+     <div class="row between" style="align-items:flex-start">
+      <div><h1 class="h1">${esc(t().patientHi)}, ${esc(displayName())} 👋</h1><p class="muted" style="margin:4px 0 0">${esc(t().patientHiSub)}</p></div>
+      <button class="btn btn-ghost btn-sm" data-tile="notifications" style="width:auto;position:relative;flex-shrink:0" aria-label="${esc(t().sym.notifTitle)}"><span style="font-size:18px">🔔</span>${unreadNotifCount>0?`<span class="dot" style="position:absolute;top:-4px;right:-4px">${unreadNotifCount}</span>`:""}</button>
+     </div>
+   </div>
+   <label class="glass search">${I.search}<input id="homeSearch" placeholder="${esc(t().search)}" aria-label="${esc(t().search)}"></label>
    <div class="grid2">${homeTiles().join("")}</div></div>`;
 }
 function norm(s){return String(s).toLowerCase().replace(/[’'`ʻ\-\s]/g,"").replace(/leaflet|yoriqnoma|инструкция|instruksiya/g,"")}
@@ -417,7 +555,7 @@ function vProducts(){
 }
 function pgrid(list){
   if(!list.length) return `<div class="glass empty"><div class="big">🔎</div><p>${esc(t().noResults)}</p></div>`;
-  return `<div class="pgrid">${list.map(p=>`<button class="glass pcard" data-prod="${p.id}"><div class="pimg"><img src="${ASSETS[p.id]}" alt="${esc(p.name)}" loading="lazy"></div><b>${esc(p.name)}</b><span class="cap">${p.sub?esc(p.sub[S.lang]):"&nbsp;"}</span></button>`).join("")}</div>`;
+  return `<div class="pgrid">${list.map(p=>`<button class="glass pcard" data-prod="${p.id}"><div class="pimg"><img src="${productImage(p)}" alt="${esc(p.name)}" loading="lazy"></div><b>${esc(p.name)}</b><span class="cap">${p.sub?esc(p.sub[S.lang]):"&nbsp;"}</span></button>`).join("")}</div>`;
 }
 function cartCount(){return Object.values(S.cart).reduce((a,b)=>a+b,0)}
 function vOrders(){
@@ -425,7 +563,7 @@ function vOrders(){
   const items=Object.entries(S.cart).filter(([,q])=>q>0);
   return `${header()}<div class="screen stack"><h1 class="h1">${esc(t().ordersTitle)}</h1>
    <h2 class="h2">🛒 ${esc(t().cart)}</h2>
-   ${items.length?`<div class="glass list">${items.map(([id,q])=>{const p=PRODUCTS.find(x=>x.id===id);return `<div class="li"><div class="l"><img src="${ASSETS[id]}" alt="" style="width:44px;height:44px;object-fit:contain;background:#fff;border-radius:12px"><b>${esc(p.name)}</b></div><div class="qty"><button data-dec="${id}" aria-label="−">−</button><span>${q}</span><button data-inc="${id}" aria-label="+">+</button></div></div>`}).join("")}</div>
+   ${items.length?`<div class="glass list">${items.map(([id,q])=>{const p=PRODUCTS.find(x=>x.id===id);return `<div class="li"><div class="l"><img src="${productImage(p)}" alt="" style="width:44px;height:44px;object-fit:contain;background:#fff;border-radius:12px"><b>${esc(p.name)}</b></div><div class="qty"><button data-dec="${id}" aria-label="−">−</button><span>${q}</span><button data-inc="${id}" aria-label="+">+</button></div></div>`}).join("")}</div>
      <div class="notice"><span>⚠️</span><span>${esc(t().checkoutOff)}</span></div>
      <button class="btn btn-primary" disabled>${esc(t().checkout)}</button>`
    :`<div class="glass empty"><div class="big">📦</div><h2 class="h2">${esc(t().cartEmpty)}</h2><p class="muted">${esc(t().cartEmptySub)}</p><button class="btn btn-primary" data-tab="products">${esc(t().seeProducts)}</button></div>`}
@@ -441,15 +579,26 @@ function vSupport(){
     ${[["operator","📞"],["order","📦"],["product","💊"],["problem","⚠️"],["other","❓"]].map(([k,e])=>`<button class="li" data-phase="4" data-tile="sup"><span class="l"><span>${e}</span><b>${esc(s[k])}</b></span><span class="soon">${esc(t().soon)}</span></button>`).join("")}
    </div><div class="notice"><span>ℹ️</span><span>${esc(t().supNote)}</span></div></div>`;
 }
+let patientCounts=null;
+function refreshPatientCounts(){
+  if(!(BACKEND_CONFIGURED && tg && tg.initData && S.role==="PATIENT")) return;
+  api.fetchProfile().then(j=>{ patientCounts=j&&j.counts||null; if(S.step==="main"&&S.tab==="profile") render(); }).catch(()=>{});
+}
 function vProfile(){
   const p=S.profile||{};
   const name=[p.first,p.last].filter(Boolean).join(" ")||p.resp||"—";
   const org=p.pname||p.company||p.work||"—";
   const region=[p.city,p.district].filter(Boolean).join(", ")||p.region||p.wregion||"—";
+  const s=t().sym;
   return `${header(false)}<div class="screen stack"><h1 class="h1">${esc(t().profile)}</h1>
    <div class="glass" style="padding:18px"><dl class="kv">
     <dt>👤</dt><dd>${esc(name)}</dd><dt>${esc(t().phone)}</dt><dd>${esc(p.phone||"—")}</dd><dt>${esc(t().role)}</dt><dd>${ROLE_ICON[S.role]} ${esc(t().roles[S.role])}</dd>
     <dt>${esc(t().org)}</dt><dd>${esc(org)}</dd><dt>${esc(t().region)}</dt><dd>${esc(region)}</dd><dt>${esc(t().verif)}</dt><dd>${esc(t().verifPending)}</dd></dl></div>
+   ${S.role==="PATIENT"&&patientCounts?`<div class="glass list">
+    <button class="li" data-tile="myRequests"><span class="l">📋 <b>${esc(t().tiles.myRequests[0])}</b></span><span class="cap">${patientCounts.requests??0}</span></button>
+    <button class="li" data-tile="saved"><span class="l">❤️ <b>${esc(t().tiles.saved[0])}</b></span><span class="cap">${patientCounts.favorites??0}</span></button>
+    <button class="li" data-tile="pOrders"><span class="l">🛒 <b>${esc(t().tiles.pOrders[0])}</b></span><span class="cap">${patientCounts.orders??0}</span></button>
+   </div>`:""}
    <h2 class="h2">⚙️ ${esc(t().settings)}</h2>
    <div class="glass list">
     <div class="li"><b>${esc(t().language)}</b><div class="lang-mini">${["uz","ru","en"].map(l=>`<button data-lang="${l}" aria-pressed="${S.lang===l}">${l.toUpperCase()}</button>`).join("")}</div></div>
@@ -466,10 +615,11 @@ function cmdBlock(cmd,label){
    <div class="row between"><code class="cmd">/${cmd}</code><div class="row"><button class="btn btn-ghost btn-sm" data-copy="/${cmd}">${esc(t().copy)}</button><a class="btn btn-primary btn-sm" style="width:auto" href="${BOT}" target="_blank" rel="noopener">${esc(t().openBot)}</a></div></div></div>`;
 }
 function sheetProduct(id){
-  const p=PRODUCTS.find(x=>x.id===id); const canOrder=S.role!=="DOCTOR" && S.role!=="MEDICAL_REP";
+  const p=PRODUCTS.find(x=>x.id===id); if(!p) return closeSheet();
+  const canOrder=S.role!=="DOCTOR" && S.role!=="MEDICAL_REP";
   const docs=p.docs.map(d=>cmdBlock(d.cmd, d.lang?`📖 ${t().leaflet} · ${d.lang==="uz"?"🇺🇿 "+t().uz:"🇷🇺 "+t().ru}`:`📖 ${t().leafletPdf}`)).join("");
   openSheet(`<div class="stack">
-   <div class="hero-img"><img src="${ASSETS[id]}" alt="${esc(p.name)}"></div>
+   <div class="hero-img"><img src="${productImage(p)}" alt="${esc(p.name)}"></div>
    <div><h2 class="h1" style="font-size:22px">${esc(p.name)}</h2>${p.sub?`<span class="cap">${esc(p.sub[S.lang])}</span>`:""}</div>
    <div class="glass" style="padding:14px 16px"><dl class="kv"><dt>${esc(t().desc)}</dt><dd><span class="data-req">${esc(t().dataReq)}</span></dd><dt>${esc(t().form)}</dt><dd>${p.sub?esc(p.sub[S.lang]):`<span class="data-req">${esc(t().dataReq)}</span>`}</dd></dl></div>
    ${docs}
@@ -479,6 +629,7 @@ function sheetProduct(id){
      <button class="li" data-tile="spec" data-phase="4"><span class="l">📞 <b>${esc(t().contactSpec)}</b></span><span class="soon">${esc(t().soon)}</span></button>
    </div>
    ${canOrder?`<button class="btn btn-primary" data-add="${id}">📦 ${esc(t().addCart)}</button>`:""}
+   ${S.role==="PATIENT"?`<button class="btn btn-ghost" data-fav="${id}">${favSlugs.has(id)?"❤️":"🤍"} ${esc(t().tiles.saved[0])}</button>`:""}
    <div class="safety">⚕️ ${esc(t().safety)}</div>
    <button class="btn btn-ghost" data-close>${esc(t().close)}</button></div>`);
 }
@@ -491,9 +642,218 @@ function sheetLeaflets(){
    <a class="btn btn-primary" href="${BOT}" target="_blank" rel="noopener">${esc(t().openBot)}</a><button class="btn btn-ghost" data-close>${esc(t().close)}</button></div>`);
 }
 
+/* ---------- patient: shared state ---------- */
+let unreadNotifCount = 0;
+let supportSelType = "product";
+
+/* ---------- patient: "Meni nima bezovta qilmoqda?" symptom picker ---------- */
+let symSel = new Set();
+function symOptions(){return [["headache","🤕"],["sore_throat","🗣️"],["cough","😮‍💨"],["allergy","🤧"],["stomach","🤢"],["vitamins","💊"],["other","❓"]]}
+function renderSymSheet(err){
+  const s=t().sym;
+  openSheet(`<div class="stack">
+   <h2 class="h1" style="font-size:20px">${esc(s.title)}</h2>
+   <p class="muted" style="margin:0">${esc(s.sub)}</p>
+   <div class="stack" style="gap:8px">
+    ${symOptions().map(([k,ic])=>`<button class="glass choice" data-symtoggle="${k}" aria-pressed="${symSel.has(k)}"><span class="ico">${ic}</span><span><b>${esc(s[k])}</b></span></button>`).join("")}
+    <button class="glass choice" data-symcustom aria-pressed="${symSel.has("__custom")}"><span class="ico">✏️</span><span><b>${esc(s.customBtn)}</b></span></button>
+   </div>
+   ${symSel.has("__custom")?`<div class="field"><label for="symCustomInput">${esc(s.customQ)}</label><textarea id="symCustomInput" rows="2" placeholder="${esc(s.customPh)}">${esc(window.__symCustomText||"")}</textarea></div>`:""}
+   ${err?`<div class="field err"><div class="e">${esc(err)}</div></div>`:""}
+   <div class="safety">⚕️ ${esc(s.disclaimer)}</div>
+   <button class="btn btn-primary" data-symsubmit>${esc(s.submit)}</button>
+   <button class="btn btn-ghost" data-close>${esc(t().close)}</button></div>`);
+}
+function sheetSymptoms(){ symSel=new Set(); window.__symCustomText=""; renderSymSheet(); }
+async function submitSymptoms(){
+  const s=t().sym;
+  if(symSel.size===0) return renderSymSheet(s.pickAtLeastOne);
+  const chosen=[...symSel].filter(k=>k!=="__custom");
+  const custom=symSel.has("__custom")?(document.getElementById("symCustomInput")?.value||"").trim():"";
+  if(symSel.has("__custom") && !custom) return renderSymSheet(s.pickAtLeastOne);
+  openSheet(`<div class="stack" style="text-align:center;padding:24px 4px">${esc(s.sending)}</div>`);
+  try{
+    const res = await api.saveSymptomRequest(chosen,custom);
+    haptic();
+    renderSymptomResult((res && res.matched_products) || []);
+  }catch(e){ renderSymSheet(s.sendError); }
+}
+function renderSymptomResult(matched){
+  const s=t().sym;
+  openSheet(`<div class="stack">
+   <div style="text-align:center"><div style="font-size:40px">✅</div><h2 class="h1" style="font-size:20px">${esc(s.sent)}</h2></div>
+   ${matched.length?`<h2 class="h2">${esc(s.resultTitle)}</h2><p class="cap" style="margin:0">${esc(s.resultSub)}</p><div class="pgrid">${matched.map(p=>`<button class="glass pcard" data-prod="${p.slug}"><div class="pimg"><img src="${p.image_url||ASSETS[p.slug]||ASSETS.icon||""}" alt="${esc(p.name)}" loading="lazy"></div><b>${esc(p.name)}</b></button>`).join("")}</div>`
+   :`<div class="glass empty"><p class="muted" style="margin:0">${esc(s.noMatch)}</p></div>`}
+   <div class="safety">⚕️ ${esc(s.disclaimer)}</div>
+   <button class="btn btn-primary" data-close>${esc(t().close)}</button></div>`);
+}
+async function sheetMyRequests(){
+  const s=t().sym;
+  openSheet(`<div class="stack" style="text-align:center;padding:24px 4px">${esc(s.myReqLoading)}</div>`);
+  try{
+    const rows = await api.fetchMyRequests();
+    if(!rows.length){ openSheet(`<div class="stack" style="text-align:center;padding:20px 4px"><div style="font-size:40px">📋</div><p class="muted">${esc(s.myReqEmpty)}</p><button class="btn btn-ghost" data-close>${esc(t().close)}</button></div>`); return; }
+    const statusLabel={new:s.statusNew,reviewed:s.statusReviewed,closed:s.statusClosed};
+    openSheet(`<div class="stack"><h2 class="h1" style="font-size:20px">${esc(t().tiles.myRequests[0])}</h2>
+     <div class="glass list">${rows.map(r=>`<button class="li" data-reqdetail="${r.id}" style="align-items:flex-start;width:100%;background:none;border:none;text-align:left;cursor:pointer;font:inherit;color:inherit"><div class="l" style="flex-direction:column;align-items:flex-start;gap:4px"><b>${esc((r.symptoms&&r.symptoms.length?r.symptoms.join(", "):(r.custom_symptom||"—")))}</b><span class="cap">${new Date(r.created_at).toLocaleDateString()} · ${esc(statusLabel[r.status]||r.status)}${r.admin_reply?` · 💬 ${esc(s.pharmacistReply)}`:""}</span></div>${I.chev}</button>`).join("")}</div>
+     <button class="btn btn-ghost" data-close>${esc(t().close)}</button></div>`);
+  }catch(e){
+    openSheet(`<div class="stack" style="text-align:center;padding:20px 4px"><p class="muted">${esc(s.myReqError)}</p><button class="btn btn-ghost" data-close>${esc(t().close)}</button></div>`);
+  }
+}
+
+/* ---------- patient: request detail (pharmacist reply + matched products) ---------- */
+async function sheetRequestDetail(id){
+  const s=t().sym;
+  openSheet(`<div class="stack" style="text-align:center;padding:24px 4px">${esc(s.myReqLoading)}</div>`);
+  try{
+    const res = await api.fetchRequestDetail(id);
+    const r = res.request || res;
+    const matched = res.matched_products || [];
+    const statusLabel={new:s.statusNew,reviewed:s.statusReviewed,closed:s.statusClosed};
+    openSheet(`<div class="stack">
+     <h2 class="h1" style="font-size:20px">${esc(s.detailTitle)}</h2>
+     <div class="glass" style="padding:14px 16px"><dl class="kv">
+      <dt>🩺</dt><dd>${esc((r.symptoms&&r.symptoms.length?r.symptoms.join(", "):(r.custom_symptom||"—")))}</dd>
+      <dt>📅</dt><dd>${new Date(r.created_at).toLocaleDateString()}</dd>
+     </dl></div>
+     <span class="pill badge">${esc(statusLabel[r.status]||r.status)}</span>
+     ${r.admin_reply?`<div class="glass" style="padding:14px 16px"><b>💬 ${esc(s.pharmacistReply)}</b><p style="margin:6px 0 0">${esc(r.admin_reply)}</p></div>`:""}
+     ${matched.length?`<h2 class="h2">${esc(s.resultTitle)}</h2><div class="pgrid">${matched.map(p=>`<button class="glass pcard" data-prod="${p.slug}"><div class="pimg"><img src="${p.image_url||ASSETS[p.slug]||ASSETS.icon||""}" alt="${esc(p.name)}" loading="lazy"></div><b>${esc(p.name)}</b></button>`).join("")}</div>`:""}
+     <div class="safety">⚕️ ${esc(s.disclaimer)}</div>
+     <button class="btn btn-ghost" data-close>${esc(t().close)}</button></div>`);
+  }catch(e){
+    openSheet(`<div class="stack" style="text-align:center;padding:20px 4px"><p class="muted">${esc(s.myReqError)}</p><button class="btn btn-ghost" data-close>${esc(t().close)}</button></div>`);
+  }
+}
+
+/* ---------- patient: favorites ---------- */
+async function sheetFavorites(){
+  const s=t().sym;
+  openSheet(`<div class="stack" style="text-align:center;padding:24px 4px">${esc(s.favLoading)}</div>`);
+  try{
+    const rows = await api.fetchFavorites();
+    favSlugs = new Set(rows.map(r=>r.slug));
+    if(!rows.length){ openSheet(`<div class="stack" style="text-align:center;padding:20px 4px"><div style="font-size:40px">❤️</div><p class="muted">${esc(s.favEmpty)}</p><button class="btn btn-ghost" data-close>${esc(t().close)}</button></div>`); return; }
+    openSheet(`<div class="stack"><h2 class="h1" style="font-size:20px">${esc(t().tiles.saved[0])}</h2>
+     <div class="pgrid">${rows.map(p=>`<button class="glass pcard" data-prod="${p.slug}"><div class="pimg"><img src="${p.image_url||ASSETS[p.slug]||ASSETS.icon||""}" alt="${esc(p.name)}" loading="lazy"></div><b>${esc(p.name)}</b></button>`).join("")}</div>
+     <button class="btn btn-ghost" data-close>${esc(t().close)}</button></div>`);
+  }catch(e){
+    openSheet(`<div class="stack" style="text-align:center;padding:20px 4px"><p class="muted">${esc(s.favError)}</p><button class="btn btn-ghost" data-close>${esc(t().close)}</button></div>`);
+  }
+}
+async function toggleFavorite(id){
+  const s=t().sym;
+  try{
+    if(favSlugs.has(id)){ await api.removeFavorite(id); favSlugs.delete(id); toast(s.favRemoved); }
+    else { await api.addFavorite(id); favSlugs.add(id); toast(s.favAdded); }
+    haptic();
+    if($("#sheet").classList.contains("on")) sheetProduct(id);
+  }catch(e){ toast(s.favError); }
+}
+
+/* ---------- patient: orders (architecture-ready, always a real empty state) ---------- */
+async function sheetOrders(){
+  const s=t().sym;
+  openSheet(`<div class="stack" style="text-align:center;padding:24px 4px">${esc(s.ordersLoading)}</div>`);
+  try{
+    const rows = await api.fetchOrders();
+    if(!rows.length){ openSheet(`<div class="stack" style="text-align:center;padding:20px 4px"><div style="font-size:40px">🛒</div><p class="muted">${esc(s.ordersEmpty)}</p><button class="btn btn-ghost" data-close>${esc(t().close)}</button></div>`); return; }
+    const statusLabel={pending:s.statusPending,preparing:s.statusPreparing,ready:s.statusReady,completed:s.statusCompleted,cancelled:s.statusCancelled};
+    openSheet(`<div class="stack"><h2 class="h1" style="font-size:20px">${esc(t().tiles.pOrders[0])}</h2>
+     <div class="glass list">${rows.map(o=>`<div class="li"><div class="l" style="flex-direction:column;align-items:flex-start;gap:4px"><b>#${esc(String(o.id).slice(0,8))}</b><span class="cap">${new Date(o.created_at).toLocaleDateString()} · ${esc(statusLabel[o.status]||o.status)}</span></div></div>`).join("")}</div>
+     <button class="btn btn-ghost" data-close>${esc(t().close)}</button></div>`);
+  }catch(e){
+    openSheet(`<div class="stack" style="text-align:center;padding:20px 4px"><p class="muted">${esc(s.ordersError)}</p><button class="btn btn-ghost" data-close>${esc(t().close)}</button></div>`);
+  }
+}
+
+/* ---------- patient: contact a pharmacist ---------- */
+function sheetPharmacist(){
+  supportSelType="product"; window.__supportText="";
+  renderPharmacistSheet();
+}
+function renderPharmacistSheet(err){
+  const s=t().sym;
+  openSheet(`<div class="stack">
+   <h2 class="h1" style="font-size:20px">${esc(t().tiles.pharmacist[0])}</h2>
+   <div class="chips">${Object.entries(s.supportTypes).map(([k,label])=>`<button class="chip" data-support-type="${k}" aria-pressed="${supportSelType===k}">${esc(label)}</button>`).join("")}</div>
+   <div class="field"><label for="supportInput">${esc(s.supportQ)}</label><textarea id="supportInput" rows="3" placeholder="${esc(s.supportPh)}">${esc(window.__supportText||"")}</textarea></div>
+   ${err?`<div class="field err"><div class="e">${esc(err)}</div></div>`:""}
+   <button class="btn btn-primary" data-support-send>${esc(s.supportSend)}</button>
+   <button class="btn btn-ghost" data-tile="supportHistory">📋 ${esc(s.supportHistoryTitle)}</button>
+   <a class="btn btn-ghost" href="${BOT}" target="_blank" rel="noopener">💬 ${esc(t().sup.tg)}</a>
+   <button class="btn btn-ghost" data-close>${esc(t().close)}</button></div>`);
+}
+async function submitSupport(){
+  const s=t().sym;
+  const msg=(document.getElementById("supportInput")?.value||"").trim();
+  window.__supportText=msg;
+  if(!msg) return renderPharmacistSheet(s.pickAtLeastOne);
+  openSheet(`<div class="stack" style="text-align:center;padding:24px 4px">${esc(s.sending)}</div>`);
+  try{
+    await api.sendSupportRequest(supportSelType, msg);
+    haptic(); toast(s.supportSent); closeSheet();
+  }catch(e){ renderPharmacistSheet(s.supportError); }
+}
+async function sheetSupportHistory(){
+  const s=t().sym;
+  openSheet(`<div class="stack" style="text-align:center;padding:24px 4px">${esc(s.myReqLoading)}</div>`);
+  try{
+    const rows = await api.fetchSupportRequests();
+    if(!rows.length){ openSheet(`<div class="stack" style="text-align:center;padding:20px 4px"><div style="font-size:40px">📞</div><p class="muted">${esc(s.supportHistoryEmpty)}</p><button class="btn btn-ghost" data-close>${esc(t().close)}</button></div>`); return; }
+    openSheet(`<div class="stack"><h2 class="h1" style="font-size:20px">${esc(s.supportHistoryTitle)}</h2>
+     <div class="glass list">${rows.map(r=>`<div class="li" style="align-items:flex-start"><div class="l" style="flex-direction:column;align-items:flex-start;gap:4px"><b>${esc(r.message)}</b><span class="cap">${new Date(r.created_at).toLocaleDateString()}</span>${r.admin_reply?`<span class="cap">💬 ${esc(s.pharmacistReply)}: ${esc(r.admin_reply)}</span>`:""}</div></div>`).join("")}</div>
+     <button class="btn btn-ghost" data-close>${esc(t().close)}</button></div>`);
+  }catch(e){
+    openSheet(`<div class="stack" style="text-align:center;padding:20px 4px"><p class="muted">${esc(s.myReqError)}</p><button class="btn btn-ghost" data-close>${esc(t().close)}</button></div>`);
+  }
+}
+
+/* ---------- patient: notifications ---------- */
+async function refreshNotifCount(){
+  if(!(BACKEND_CONFIGURED && tg && tg.initData && S.role==="PATIENT")) return;
+  try{
+    const rows = await api.fetchNotifications();
+    unreadNotifCount = rows.filter(n=>!n.is_read).length;
+    if(S.step==="main" && S.tab==="home") render();
+  }catch(e){}
+}
+async function sheetNotifications(){
+  const s=t().sym;
+  openSheet(`<div class="stack" style="text-align:center;padding:24px 4px">${esc(s.notifLoading)}</div>`);
+  try{
+    const rows = await api.fetchNotifications();
+    if(!rows.length){ openSheet(`<div class="stack" style="text-align:center;padding:20px 4px"><div style="font-size:40px">🔔</div><p class="muted">${esc(s.notifEmpty)}</p><button class="btn btn-ghost" data-close>${esc(t().close)}</button></div>`); return; }
+    openSheet(`<div class="stack"><h2 class="h1" style="font-size:20px">${esc(s.notifTitle)}</h2>
+     <div class="glass list">${rows.map(n=>`<div class="li" style="align-items:flex-start"><div class="l" style="flex-direction:column;align-items:flex-start;gap:4px">${n.is_read?"":`<span class="pill badge" style="font-size:10px">●</span>`}<b>${esc(n.title||"")}</b><span class="cap">${esc(n.message||"")}</span><span class="cap">${new Date(n.created_at).toLocaleDateString()}</span></div></div>`).join("")}</div>
+     <button class="btn btn-ghost" data-close>${esc(t().close)}</button></div>`);
+    const unread=rows.filter(n=>!n.is_read);
+    unread.forEach(n=>{ api.markNotificationRead(n.id).catch(()=>{}); });
+    unreadNotifCount=0;
+  }catch(e){
+    openSheet(`<div class="stack" style="text-align:center;padding:20px 4px"><p class="muted">${esc(s.notifEmpty)}</p><button class="btn btn-ghost" data-close>${esc(t().close)}</button></div>`);
+  }
+}
+
 /* ---------- render ---------- */
 function renderNav(){
   const onb=S.step!=="main"; $("#nav").hidden=onb; if(onb) return;
+  if(S.role==="PATIENT"){
+    const items=[
+      {tab:"home", icon:I.home, label:t().nav.home},
+      {tab:"products", icon:I.products, label:t().tiles.products[0]},
+      {sheet:"symptom", icon:"🩺", label:t().tiles.symptom[0]},
+      {sheet:"saved", icon:"❤️", label:t().tiles.saved[0]},
+      {tab:"profile", icon:I.profile, label:t().nav.profile}
+    ];
+    $("#navIn").innerHTML=items.map(n=>{
+      const active = n.tab && S.tab===n.tab;
+      const iconHtml = typeof n.icon==="string" ? `<span style="font-size:20px;line-height:1">${n.icon}</span>` : n.icon;
+      return `<button ${n.tab?`data-tab="${n.tab}"`:`data-navsheet="${n.sheet}"`} ${active?'aria-current="page"':""}>${iconHtml}<span>${esc(n.label)}</span></button>`;
+    }).join("");
+    return;
+  }
   $("#navIn").innerHTML=["home","products","orders","support","profile"].map(k=>`<button data-tab="${k}" ${S.tab===k?'aria-current="page"':""}>${I[k]}<span>${esc(t().nav[k])}</span>${k==="orders"&&cartCount()?`<span class="dot">${cartCount()}</span>`:""}</button>`).join("");
 }
 function render(){
@@ -512,12 +872,29 @@ document.addEventListener("click",e=>{
   if(d.lang){S.lang=d.lang;haptic();render();return}
   if(d.go){S.step=d.go;haptic();window.scrollTo(0,0);return render()}
   if(d.role){S.role=d.role;haptic();return render()}
-  if(d.tab){closeSheet();S.step="main";S.tab=d.tab;window.scrollTo(0,0);haptic();return render()}
+  if(d.tab){closeSheet();S.step="main";S.tab=d.tab;window.scrollTo(0,0);haptic();render();if(d.tab==="profile")refreshPatientCounts();return}
   if(d.prod) return sheetProduct(d.prod);
   if("catalog" in d) return sheetCatalog();
   if(d.tile==="products"||d.tile==="order"){S.tab="products";return render()}
   if(d.tile==="leaflets") return sheetLeaflets();
   if(d.tile==="support"){S.tab="support";return render()}
+  if(d.tile==="symptom") return sheetSymptoms();
+  if(d.tile==="myRequests") return sheetMyRequests();
+  if(d.tile==="saved") return sheetFavorites();
+  if(d.tile==="pOrders") return sheetOrders();
+  if(d.tile==="pharmacist") return sheetPharmacist();
+  if(d.tile==="notifications") return sheetNotifications();
+  if(d.tile==="supportHistory") return sheetSupportHistory();
+  if(d.tile==="profileTile"){S.tab="profile";return render()}
+  if(d.navsheet==="symptom") return sheetSymptoms();
+  if(d.navsheet==="saved") return sheetFavorites();
+  if(d.fav) return toggleFavorite(d.fav);
+  if(d.reqdetail) return sheetRequestDetail(d.reqdetail);
+  if(d.supportType){ supportSelType=d.supportType; haptic(); return renderPharmacistSheet(); }
+  if("supportSend" in d) return submitSupport();
+  if(d.symtoggle){ symSel.has(d.symtoggle)?symSel.delete(d.symtoggle):symSel.add(d.symtoggle); haptic(); return renderSymSheet(); }
+  if("symcustom" in d){ symSel.has("__custom")?symSel.delete("__custom"):symSel.add("__custom"); haptic(); return renderSymSheet(); }
+  if("symsubmit" in d) return submitSymptoms();
   if(d.phase) return sheetSoon(d.phase);
   if("close" in d) return closeSheet();
   if(d.add){S.cart[d.add]=(S.cart[d.add]||0)+1;haptic();toast(t().added);closeSheet();return renderNav(),save()}
@@ -530,6 +907,7 @@ document.addEventListener("click",e=>{
 $("#scrim").addEventListener("click",closeSheet);
 document.addEventListener("input",e=>{
   if(e.target.id==="prodSearch"){S.q=e.target.value;$("#plist").innerHTML=pgrid(PRODUCTS.filter(p=>matches(p,S.q)))}
+  if(e.target.id==="symCustomInput"){window.__symCustomText=e.target.value}
 });
 document.addEventListener("keydown",e=>{
   if(e.target.id==="homeSearch"&&e.key==="Enter"){S.q=e.target.value;S.tab="products";render()}
@@ -544,6 +922,7 @@ document.addEventListener("submit",e=>{
     w.classList.toggle("err",!!msg); w.querySelector(".e").textContent=msg; if(msg) ok=false; fd[k]=v;});
   if(!ok){e.target.classList.remove("shake");void e.target.offsetWidth;e.target.classList.add("shake");return}
   S.profile=fd; S.step="main"; S.tab="home"; haptic(); window.scrollTo(0,0); render();
+  api.saveProfile(S.role, fd);
 });
 
 /* ---------- boot ---------- */
@@ -551,6 +930,23 @@ if(tg){try{tg.ready();tg.expand()}catch(e){}}
 $("#splashLogo").src=ASSETS.logo;
 render();
 setTimeout(()=>{$("#splash").classList.add("hide");setTimeout(()=>$("#splash").remove(),500)},1000);
+api.authPing();
+if(S.role==="PATIENT" && BACKEND_CONFIGURED && tg && tg.initData){
+  api.fetchFavorites().then(rows=>{ favSlugs=new Set((rows||[]).map(r=>r.slug)); if(S.step==="main"&&S.tab==="home") render(); }).catch(()=>{});
+  refreshNotifCount();
+  refreshPatientCounts();
+}
+api.fetchProducts().then(rows=>{
+  if(!rows) return;
+  rows.forEach(r=>{
+    const id=r.slug;
+    const sub=(r.form_uz||r.form_ru||r.form_en)?{uz:r.form_uz||"",ru:r.form_ru||"",en:r.form_en||""}:null;
+    const idx=PRODUCTS.findIndex(p=>p.id===id);
+    const merged={id,name:r.name,sub,alias:r.search_alias||"",image_url:r.image_url,docs:(idx>=0?PRODUCTS[idx].docs:[])};
+    if(idx>=0) PRODUCTS[idx]=Object.assign({},PRODUCTS[idx],merged); else PRODUCTS.push(merged);
+  });
+  if(S.step==="main" && S.tab==="products") render();
+}).catch(()=>{});
 </script>
 
 </body></html>
