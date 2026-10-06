@@ -1,0 +1,346 @@
+<!doctype html>
+<html lang="uz">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Well Med Pharm — Admin</title>
+<style>
+  :root{
+    --bg:#0f1420; --panel:#161d2e; --panel2:#1c2439; --border:#273049;
+    --text:#e8ecf5; --muted:#8b96ad; --accent:#3b82f6; --accent2:#2563eb;
+    --danger:#ef4444; --ok:#22c55e;
+    font-family:-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);min-height:100vh}
+  .center{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:16px}
+  .card{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:28px;width:100%;max-width:380px}
+  .card h1{font-size:20px;margin:0 0 4px}
+  .card p.sub{color:var(--muted);font-size:13px;margin:0 0 20px}
+  label{display:block;font-size:13px;color:var(--muted);margin:14px 0 6px}
+  input{width:100%;padding:10px 12px;border-radius:8px;border:1px solid var(--border);background:var(--panel2);color:var(--text);font-size:14px}
+  input:focus{outline:2px solid var(--accent)}
+  button{cursor:pointer;border:none;border-radius:8px;font-size:14px;font-weight:600}
+  .btn-primary{width:100%;padding:11px;background:var(--accent);color:#fff;margin-top:20px}
+  .btn-primary:hover{background:var(--accent2)}
+  .btn-link{background:none;color:var(--accent);font-size:13px;padding:0;margin-top:14px}
+  .err{color:var(--danger);font-size:13px;margin-top:10px;min-height:16px}
+  .ok-msg{color:var(--ok);font-size:13px;margin-top:10px}
+
+  .app{display:flex;min-height:100vh}
+  .sidebar{width:240px;background:var(--panel);border-right:1px solid var(--border);padding:16px 10px;flex-shrink:0}
+  .sidebar .brand{display:flex;align-items:center;gap:10px;padding:8px 10px 18px}
+  .sidebar .brand img{width:28px;height:28px;border-radius:6px}
+  .sidebar .brand b{font-size:15px}
+  .nav-item{display:flex;align-items:center;gap:10px;padding:9px 10px;border-radius:8px;color:var(--text);text-decoration:none;font-size:13.5px;cursor:pointer;margin-bottom:2px}
+  .nav-item:hover{background:var(--panel2)}
+  .nav-item.active{background:var(--accent);color:#fff}
+  .nav-item.disabled{color:var(--muted);cursor:default}
+  .nav-item.disabled:hover{background:none}
+  .nav-badge{margin-left:auto;font-size:9px;color:var(--muted);border:1px solid var(--border);border-radius:5px;padding:1px 5px}
+
+  .main{flex:1;min-width:0}
+  .topbar{display:flex;align-items:center;justify-content:space-between;padding:14px 24px;border-bottom:1px solid var(--border)}
+  .topbar .who{font-size:13px;color:var(--muted)}
+  .topbar .who b{color:var(--text)}
+  .logout-btn{background:var(--panel2);color:var(--text);padding:7px 14px;border:1px solid var(--border)}
+  .logout-btn:hover{background:var(--border)}
+  .content{padding:24px;max-width:1200px}
+  .content h2{margin:0 0 4px}
+  .content p.sub{color:var(--muted);margin:0 0 22px;font-size:13.5px}
+
+  .stat-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:14px}
+  .stat-card{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:16px}
+  .stat-card .num{font-size:26px;font-weight:700}
+  .stat-card .label{color:var(--muted);font-size:12.5px;margin-top:4px}
+  .note-box{margin-top:22px;background:var(--panel2);border:1px solid var(--border);border-radius:10px;padding:14px 16px;color:var(--muted);font-size:12.5px;line-height:1.6}
+  .soon-box{background:var(--panel);border:1px dashed var(--border);border-radius:12px;padding:40px 20px;text-align:center;color:var(--muted)}
+
+  @media (max-width:760px){
+    .app{flex-direction:column}
+    .sidebar{width:100%;display:flex;overflow-x:auto;white-space:nowrap}
+    .sidebar .brand{display:none}
+    .nav-item{display:inline-flex}
+  }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script>
+// ---------------------------------------------------------------------
+// Well Med Pharm — standalone admin panel. Separate origin/file from the
+// patient Mini App (wellmed_miniapp.html) — no Telegram WebApp SDK, no
+// shared state, deliberately. Username+password only, via admin-auth.
+// ---------------------------------------------------------------------
+const CONFIG = {
+  // Same Supabase project as the Mini App — only the function names differ.
+  SUPABASE_URL: "https://miarkevtlmadwlutonkm.supabase.co",
+};
+const AUTH_BASE = CONFIG.SUPABASE_URL + "/functions/v1/admin-auth";
+const API_BASE = CONFIG.SUPABASE_URL + "/functions/v1/admin-api";
+
+const SIDEBAR = [
+  {key:"dashboard", icon:"🏠", label:"Dashboard", live:true},
+  {key:"users", icon:"👥", label:"Users"},
+  {key:"patients", icon:"🤒", label:"Patients"},
+  {key:"doctors", icon:"👨‍⚕️", label:"Doctors"},
+  {key:"pharmacies", icon:"💊", label:"Pharmacies"},
+  {key:"reps", icon:"🧑‍⚕️", label:"Medical Reps"},
+  {key:"products", icon:"💊", label:"Products"},
+  {key:"categories", icon:"📂", label:"Categories"},
+  {key:"symptoms", icon:"🩺", label:"Symptoms"},
+  {key:"product_symptom", icon:"🔗", label:"Product-Symptom"},
+  {key:"orders", icon:"🛒", label:"Orders"},
+  {key:"requests", icon:"📋", label:"Requests"},
+  {key:"support", icon:"📞", label:"Support"},
+  {key:"locations", icon:"📍", label:"Locations"},
+  {key:"notifications", icon:"🔔", label:"Notifications"},
+  {key:"files", icon:"📁", label:"Files"},
+  {key:"content", icon:"📝", label:"Content"},
+  {key:"design", icon:"🎨", label:"Design"},
+  {key:"miniapp", icon:"📱", label:"Mini App"},
+  {key:"bot", icon:"🤖", label:"Bot"},
+  {key:"languages", icon:"🌐", label:"Languages"},
+  {key:"reports", icon:"📊", label:"Reports"},
+  {key:"admins", icon:"👑", label:"Admins", live:true},
+  {key:"permissions", icon:"🔐", label:"Permissions"},
+  {key:"audit", icon:"📜", label:"Audit Logs", live:true},
+  {key:"settings", icon:"⚙️", label:"Settings"},
+];
+
+const S = { token: sessionStorage.getItem("wmf_admin_token") || "", admin: null, route: "dashboard" };
+
+function h(tag, attrs, ...children){
+  const el = document.createElement(tag);
+  for (const k in (attrs||{})) {
+    if (k === "class") el.className = attrs[k];
+    else if (k.startsWith("on")) el.addEventListener(k.slice(2), attrs[k]);
+    else el.setAttribute(k, attrs[k]);
+  }
+  for (const c of children.flat()) if (c!=null) el.append(c.nodeType ? c : document.createTextNode(c));
+  return el;
+}
+
+async function authCall(path, opts={}){
+  const res = await fetch(AUTH_BASE + "/" + path, {
+    method: opts.method||"GET",
+    headers: Object.assign({"Content-Type":"application/json"}, S.token?{"X-Admin-Session":S.token}:{}, opts.headers||{}),
+    body: opts.body ? JSON.stringify(opts.body) : undefined,
+  });
+  let data; try { data = await res.json(); } catch { data = {}; }
+  return { ok: res.ok, status: res.status, data };
+}
+async function apiCall(path){
+  const res = await fetch(API_BASE + "/" + path, { headers: {"X-Admin-Session": S.token} });
+  let data; try { data = await res.json(); } catch { data = {}; }
+  return { ok: res.ok, status: res.status, data };
+}
+
+function render(){
+  const root = document.getElementById("root");
+  root.innerHTML = "";
+  root.append(S.admin ? AppShell() : LoginScreen());
+}
+
+function LoginScreen(){
+  let mode = "login"; // or "bootstrap"
+  const wrap = h("div", {class:"center"});
+  function draw(){
+    wrap.innerHTML = "";
+    const err = h("div", {class:"err"});
+    const userInput = h("input", {placeholder:"admin"});
+    const passInput = h("input", {type:"password", placeholder:"••••••••"});
+    const card = mode === "login"
+      ? h("div", {class:"card"},
+          h("h1",{}, "Well Med Pharm"),
+          h("p",{class:"sub"}, "Admin panelga kirish"),
+          h("label",{}, "Username"), userInput,
+          h("label",{}, "Password"), passInput,
+          h("button",{class:"btn-primary", onclick: async ()=>{
+            err.textContent = "";
+            const r = await authCall("login", {method:"POST", body:{username:userInput.value.trim(), password:passInput.value}});
+            if (!r.ok) { err.textContent = r.data.error === "invalid_credentials" ? "Login yoki parol noto'g'ri." : "Xatolik yuz berdi."; return; }
+            S.token = r.data.token; S.admin = r.data.admin;
+            sessionStorage.setItem("wmf_admin_token", S.token);
+            render();
+          }}, "Kirish"),
+          err,
+          h("button",{class:"btn-link", onclick: ()=>{mode="bootstrap"; draw();}}, "Birinchi marta sozlash (SUPER ADMIN yaratish)")
+        )
+      : BootstrapCard(()=>{mode="login"; draw();});
+    wrap.append(card);
+  }
+  draw();
+  return wrap;
+}
+
+function BootstrapCard(onDone){
+  const err = h("div", {class:"err"});
+  const secretInput = h("input", {type:"password", placeholder:"Supabase secret: ADMIN_BOOTSTRAP_SECRET"});
+  const userInput = h("input", {placeholder:"admin"});
+  const passInput = h("input", {type:"password", placeholder:"kamida 10 belgi"});
+  return h("div", {class:"card"},
+    h("h1",{}, "Birinchi SUPER ADMIN"),
+    h("p",{class:"sub"}, "Faqat admin_users jadvali bo'sh bo'lgandagina ishlaydi. Bootstrap secret — Supabase Edge Function Secrets'da ADMIN_BOOTSTRAP_SECRET nomi bilan siz o'zingiz qo'ygan qiymat."),
+    h("label",{}, "Bootstrap secret"), secretInput,
+    h("label",{}, "Yangi username"), userInput,
+    h("label",{}, "Yangi parol"), passInput,
+    h("button",{class:"btn-primary", onclick: async ()=>{
+      err.textContent = "";
+      const r = await authCall("bootstrap", {method:"POST", headers:{"X-Bootstrap-Secret": secretInput.value}, body:{username:userInput.value.trim(), password:passInput.value}});
+      if (!r.ok) { err.textContent = {already_bootstrapped:"Admin allaqachon mavjud — bu ekran endi ishlamaydi.", bootstrap_disabled:"ADMIN_BOOTSTRAP_SECRET sozlanmagan.", unauthorized:"Secret noto'g'ri.", password_too_short:"Parol juda qisqa (kamida 10 belgi)."}[r.data.error] || "Xatolik yuz berdi."; return; }
+      err.className = "ok-msg"; err.textContent = "Yaratildi! Endi shu login bilan kiring.";
+      setTimeout(onDone, 1200);
+    }}, "Yaratish"),
+    err,
+    h("button",{class:"btn-link", onclick: onDone}, "← Login ekraniga qaytish")
+  );
+}
+
+function AppShell(){
+  const app = h("div", {class:"app"});
+  const sidebar = h("div", {class:"sidebar"},
+    h("div",{class:"brand"}, h("b",{}, "💊 Well Med Admin")),
+    SIDEBAR.map(item => h("a", {
+      class: "nav-item" + (item.key===S.route?" active":"") + (item.live?"":" disabled"),
+      onclick: ()=>{ if(item.live){ S.route = item.key; render(); } }
+    }, item.icon+" "+item.label, item.live?null:h("span",{class:"nav-badge"},"tez orada")))
+  );
+  const content = h("div", {class:"content", id:"content"}, h("div",{},"Yuklanmoqda..."));
+  const main = h("div", {class:"main"},
+    h("div", {class:"topbar"},
+      h("div",{class:"who"}, "Xush kelibsiz, ", h("b",{}, S.admin.username), " (", S.admin.role, ")"),
+      h("button",{class:"logout-btn", onclick: async ()=>{
+        await authCall("logout", {method:"POST"});
+        S.token=""; S.admin=null; sessionStorage.removeItem("wmf_admin_token");
+        render();
+      }}, "Chiqish")
+    ),
+    content
+  );
+  app.append(sidebar, main);
+  loadRoute(content);
+  return app;
+}
+
+async function loadRoute(content){
+  if (S.route === "dashboard") {
+    const r = await apiCall("dashboard");
+    content.innerHTML = "";
+    if (!r.ok) {
+      content.append(h("div",{class:"err"}, r.data.error === "unauthorized" ? "Sessiya tugagan, qayta kiring." : "Dashboard ma'lumotini olishda xatolik."));
+      if (r.status === 401) { S.token=""; S.admin=null; sessionStorage.removeItem("wmf_admin_token"); setTimeout(render, 800); }
+      return;
+    }
+    const t = r.data.totals;
+    const cards = [
+      ["Jami foydalanuvchilar", t.users], ["Bemorlar", t.patients], ["Shifokorlar", t.doctors],
+      ["Dorixonalar (profil)", t.pharmacies], ["Med. vakillar", t.medical_reps],
+      ["Faol mahsulotlar", t.active_products], ["Ro'yxatdagi dorixonalar", t.registered_pharmacies],
+      ["Faol dorixonalar", t.active_pharmacies], ["Jami murojaatlar", t.requests_total],
+      ["Bemor murojaatlari", t.patient_requests], ["Support so'rovlari", t.support_requests],
+      ["O'qilmagan bildirishnoma", t.unread_notifications],
+    ];
+    content.append(
+      h("h2",{}, "Dashboard"),
+      h("p",{class:"sub"}, "Barcha raqamlar — ma'lumotlar bazasidan jonli hisoblangan (soxta emas)."),
+      h("div",{class:"stat-grid"}, cards.map(([label,num]) => h("div",{class:"stat-card"}, h("div",{class:"num"}, String(num)), h("div",{class:"label"}, label)))),
+      h("div",{class:"note-box"}, "Grafiklar (o'sish, mashhur mahsulotlar/simptomlar) va qolgan 25 ta bo'lim (Users, Products, Orders, Map, Bot Settings va h.k.) hali qurilmagan — bu birinchi, sinaladigan bosqich: faqat login/sessiya/ruxsat tekshiruvi + jonli dashboard. Chap menyudagi \"tez orada\" bo'limlar shu sabab o'chirilgan holatda.")
+    );
+    return;
+  }
+  if (S.route === "admins") { await loadAdmins(content); return; }
+  if (S.route === "audit") { await loadAudit(content); return; }
+
+  content.innerHTML = "";
+  content.append(h("div",{class:"soon-box"}, "🛠️ Bu bo'lim hali qurilmagan."));
+}
+
+async function loadAdmins(content){
+  content.innerHTML = "";
+  const err = h("div",{class:"err"});
+  const [listRes, rolesRes] = await Promise.all([authCall("admins"), authCall("roles")]);
+  if (!listRes.ok) { content.append(h("div",{class:"err"}, listRes.data.error==="forbidden" ? "Sizda bu bo'limga ruxsat yo'q." : "Xatolik.")); return; }
+  const roles = (rolesRes.ok ? rolesRes.data.roles : []).map(r=>r.name);
+
+  const table = h("table", {style:"width:100%;border-collapse:collapse;margin-top:14px;font-size:13.5px"});
+  function rows(){
+    table.innerHTML = "";
+    table.append(h("tr",{}, ["Username","Rol","Holat","Oxirgi kirish","Amallar"].map(t=>h("th",{style:"text-align:left;padding:8px;border-bottom:1px solid var(--border);color:var(--muted);font-weight:500"},t))));
+    for (const a of listRes.data.admins) {
+      const roleSelect = h("select", {style:"padding:5px;border-radius:6px;background:var(--panel2);color:var(--text);border:1px solid var(--border)"},
+        roles.map(r => h("option", Object.assign({value:r}, r===a.role?{selected:"selected"}:{}), r)));
+      roleSelect.onchange = async ()=>{
+        const r = await authCall(`admins/${a.id}/role`, {method:"POST", body:{role: roleSelect.value}});
+        if (!r.ok) { alert(r.data.error === "forbidden" ? "Ruxsat yo'q (SUPER ADMIN'ni faqat SUPER ADMIN o'zgartira oladi)." : "Xatolik."); roleSelect.value = a.role; return; }
+        a.role = roleSelect.value;
+      };
+      const toggleBtn = h("button", {class:"btn-link", style:"color:"+(a.active?"var(--danger)":"var(--ok)"), onclick: async ()=>{
+        const r = await authCall(`admins/${a.id}/status`, {method:"POST", body:{active: !a.active}});
+        if (!r.ok) { alert(r.data.error === "forbidden" ? "Ruxsat yo'q." : "Xatolik."); return; }
+        a.active = !a.active; rows();
+      }}, a.active ? "O'chirish" : "Yoqish");
+      table.append(h("tr",{},
+        h("td",{style:"padding:8px;border-bottom:1px solid var(--border)"}, a.username),
+        h("td",{style:"padding:8px;border-bottom:1px solid var(--border)"}, roleSelect),
+        h("td",{style:"padding:8px;border-bottom:1px solid var(--border)"}, a.active ? "Faol" : "O'chirilgan"),
+        h("td",{style:"padding:8px;border-bottom:1px solid var(--border);color:var(--muted)"}, a.last_login_at ? new Date(a.last_login_at).toLocaleString() : "—"),
+        h("td",{style:"padding:8px;border-bottom:1px solid var(--border)"}, toggleBtn)
+      ));
+    }
+  }
+  rows();
+
+  // New admin form
+  const newUser = h("input",{placeholder:"username"});
+  const newPass = h("input",{type:"password",placeholder:"parol (kamida 10 belgi)"});
+  const newRole = h("select",{}, roles.map(r=>h("option",{value:r},r)));
+  const createBtn = h("button",{class:"btn-primary", style:"width:auto;padding:9px 18px;margin-top:0", onclick: async ()=>{
+    err.textContent = "";
+    const r = await authCall("admins", {method:"POST", body:{username:newUser.value.trim(), password:newPass.value, role:newRole.value}});
+    if (!r.ok) { err.textContent = {username_taken:"Bu username band.", password_too_short:"Parol juda qisqa.", forbidden:"Faqat SUPER ADMIN SUPER ADMIN yarata oladi."}[r.data.error] || "Xatolik."; return; }
+    newUser.value=""; newPass.value="";
+    const relist = await authCall("admins"); listRes.data.admins = relist.data.admins; rows();
+  }}, "+ Admin qo'shish");
+
+  content.append(
+    h("h2",{}, "Administrators"),
+    h("p",{class:"sub"}, "SUPER ADMIN hisobini faqat boshqa SUPER ADMIN boshqara oladi — server tomonda tekshiriladi."),
+    h("div",{class:"stat-card", style:"display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px"}, newUser, newPass, newRole, createBtn),
+    err,
+    table
+  );
+}
+
+async function loadAudit(content){
+  content.innerHTML = "";
+  const r = await apiCall("audit-logs?limit=50");
+  if (!r.ok) { content.append(h("div",{class:"err"}, r.data.error==="forbidden" ? "Audit log faqat SUPER ADMIN uchun." : "Xatolik.")); return; }
+  const table = h("table", {style:"width:100%;border-collapse:collapse;margin-top:14px;font-size:12.5px"});
+  table.append(h("tr",{}, ["Vaqt","Admin","Amal","Modul","Target","IP"].map(t=>h("th",{style:"text-align:left;padding:7px;border-bottom:1px solid var(--border);color:var(--muted);font-weight:500"},t))));
+  for (const l of r.data.logs) {
+    table.append(h("tr",{},
+      h("td",{style:"padding:7px;border-bottom:1px solid var(--border);color:var(--muted)"}, new Date(l.created_at).toLocaleString()),
+      h("td",{style:"padding:7px;border-bottom:1px solid var(--border)"}, l.admin_username),
+      h("td",{style:"padding:7px;border-bottom:1px solid var(--border)"}, l.action),
+      h("td",{style:"padding:7px;border-bottom:1px solid var(--border)"}, l.module),
+      h("td",{style:"padding:7px;border-bottom:1px solid var(--border);color:var(--muted)"}, l.target_id||"—"),
+      h("td",{style:"padding:7px;border-bottom:1px solid var(--border);color:var(--muted)"}, l.ip||"—")
+    ));
+  }
+  content.append(h("h2",{}, "Audit Logs"), h("p",{class:"sub"}, "Faqat SUPER ADMIN ko'radi. So'nggi 50 ta yozuv."), table);
+}
+
+// Resume an existing session on load, if the token is still valid.
+(async function init(){
+  if (S.token) {
+    const r = await authCall("session");
+    if (r.ok && r.data.admin) S.admin = r.data.admin;
+    else { S.token=""; sessionStorage.removeItem("wmf_admin_token"); }
+  }
+  render();
+})();
+</script>
+</body>
+</html>
