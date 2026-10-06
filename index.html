@@ -268,6 +268,7 @@ uz:{
  chooseLang:"Tilni tanlang", langHint:"Keyin Sozlamalarda o'zgartirishingiz mumkin.",
  welcome:"Assalomu alaykum! 👋", welcomeSub:"Well Med Pharm platformasiga xush kelibsiz. Mahsulotlar, yo'riqnomalar va buyurtmalar — bir joyda.",
  next:"Davom etish", who:"Platformaga kim sifatida kirasiz?", whoSub:"Rolingizga qarab kerakli bo'limlar ochiladi.",
+ adminLink:"Men adminman →",
  roles:{DOCTOR:"Doktor",PHARMACY:"Dorixona",MEDICAL_REP:"Medical representative",PATIENT:"Bemor / Mijoz"},
  roleDesc:{DOCTOR:"Mahsulot ma'lumotlari va yo'riqnomalar",PHARMACY:"B2B buyurtma va mahsulotlar",MEDICAL_REP:"Hududingiz, shifokorlar va dorixonalar",PATIENT:"Dorilar, simptomlar va yordam"},
  regTitle:"Ro'yxatdan o'tish", back:"Orqaga",
@@ -330,6 +331,7 @@ ru:{
  chooseLang:"Выберите язык", langHint:"Позже можно изменить в настройках.",
  welcome:"Здравствуйте! 👋", welcomeSub:"Добро пожаловать на платформу Well Med Pharm. Продукция, инструкции и заказы — в одном месте.",
  next:"Продолжить", who:"Кто вы на платформе?", whoSub:"Разделы откроются в зависимости от вашей роли.",
+ adminLink:"Я администратор →",
  roles:{DOCTOR:"Врач",PHARMACY:"Аптека",MEDICAL_REP:"Медицинский представитель",PATIENT:"Пациент / Клиент"},
  roleDesc:{DOCTOR:"Информация о препаратах и инструкции",PHARMACY:"B2B-заказы и продукция",MEDICAL_REP:"Территория, врачи и аптеки",PATIENT:"Препараты, симптомы и помощь"},
  regTitle:"Регистрация", back:"Назад",
@@ -392,6 +394,7 @@ en:{
  chooseLang:"Choose your language", langHint:"You can change it later in Settings.",
  welcome:"Welcome! 👋", welcomeSub:"Welcome to the Well Med Pharm platform. Products, leaflets and orders — all in one place.",
  next:"Continue", who:"How will you use the platform?", whoSub:"We'll open the sections that fit your role.",
+ adminLink:"I'm an admin →",
  roles:{DOCTOR:"Doctor",PHARMACY:"Pharmacy",MEDICAL_REP:"Medical representative",PATIENT:"Patient / Client"},
  roleDesc:{DOCTOR:"Product information and leaflets",PHARMACY:"B2B orders and products",MEDICAL_REP:"Your territory, doctors and pharmacies",PATIENT:"Medicines, symptoms and help"},
  regTitle:"Sign up", back:"Back",
@@ -499,7 +502,8 @@ function vWelcome(){
 function vRole(){
   return `${header()}<div class="screen stack"><div><h1 class="h1">${esc(t().who)}</h1><p class="muted" style="margin:6px 0 0">${esc(t().whoSub)}</p></div>
    ${Object.keys(ROLE_ICON).map(r=>`<button class="glass choice" data-role="${r}" aria-pressed="${S.role===r}"><span class="ico">${ROLE_ICON[r]}</span><span><b>${esc(t().roles[r])}</b><span class="cap">${esc(t().roleDesc[r])}</span></span></button>`).join("")}
-   <button class="btn btn-primary" data-go="form" ${S.role?"":"disabled"}>${esc(t().next)}</button></div>`;
+   <button class="btn btn-primary" data-go="form" ${S.role?"":"disabled"}>${esc(t().next)}</button>
+   <a class="muted" style="display:block;text-align:center;font-size:13px;padding-top:4px" href="./admin/" target="_blank" rel="noopener">${esc(t().adminLink)}</a></div>`;
 }
 const FORMS={
   DOCTOR:[["first",1],["last",1],["phone",1,"tel"],["specialty",1],["work",1],["city",1],["district",1],["clinic",0]],
